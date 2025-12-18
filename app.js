@@ -1,148 +1,79 @@
 document.addEventListener('DOMContentLoaded', () => {
-    // API Key & Configuration
+    // API KEY
     const GEMINI_API_KEY = "AIzaSyCj0oDJV0MljYh1Y-NDTyur0Utvz7UPxeo";
 
-    // --- GLOBAL BRIDGE (The Ultimate Fix for GitHub Pages) ---
-    // ضع رابط الـ Deployment الجديد هنا
+    // YOUR SMART BRIDGE URL
     const ATHAR_BRIDGE_URL = "https://script.google.com/macros/s/AKfycbyKczMPQUbG4x79fS3wbfC48nyHlJL80j8a1DOpX5FM_to4DfGbkQSGahJUSEmd7RCv/exec";
 
     const state = {
         step: 1,
         projectInfo: { idea: '', country: '', language: 'ar', currency: 'USD' },
-        analysis: null,
-        ideas: [],
-        selectedIdea: null,
-        proposal: null,
-        budget: [],
-        chart: null
+        analysis: null, selectedIdea: null, proposal: null, budget: []
     };
 
-    const i18n = {
-        ar: {
-            slogan: "أثر | لأن التغيير يبدأ بخطة",
-            hero: "نساعدك على تحويل فكرتك الإنسانية إلى مشروع يترك أثرًا حقيقيًا",
-            analyze: "تحليل الفكرة ⚡",
-            analyzing: "جاري المعالجة...",
-            nextToIdeas: "عرض الخطط والمقترحات ✨",
-            ideasStep: "الأفكار",
-            proposalStep: "المقترح",
-            budgetStep: "الميزانية",
-            exportStep: "التصدير",
-            analysisTitle: "نتائج التحليل الأولي",
-            sector: "نطاق العمل",
-            target: "الفئة المستهدفة",
-            challenges: "تحديات البيئة",
-            grandTotal: "الإجمالي التقديري الكلي"
-        },
-        en: {
-            slogan: "Athar | Because Change Starts with a Plan",
-            hero: "Helping you transform your humanitarian idea into a project with real impact",
-            analyze: "Analyze Concept ⚡",
-            analyzing: "Processing...",
-            nextToIdeas: "View Alternative Plans ✨",
-            ideasStep: "Concepts",
-            proposalStep: "Proposal",
-            budgetStep: "Budget",
-            exportStep: "Export",
-            analysisTitle: "Initial Analysis",
-            sector: "Field of Work",
-            target: "Target Beneficiaries",
-            challenges: "Environmental Challenges",
-            grandTotal: "Total Estimated Budget"
-        }
-    };
-
-    const updateGatewayStatus = (status, info = "") => {
+    // UI Feedback Helper
+    const showAIStatus = (status, msg = "") => {
         const logoSlogan = document.querySelector('.logo-slogan');
         if (!logoSlogan) return;
-        let statusEl = document.getElementById('ai-status-indicator');
-        if (!statusEl) {
-            statusEl = document.createElement('div');
-            statusEl.id = 'ai-status-indicator';
-            statusEl.style.fontSize = '0.7rem';
-            statusEl.style.marginTop = '4px';
-            statusEl.style.display = 'flex'; statusEl.style.alignItems = 'center'; statusEl.style.gap = '5px';
-            logoSlogan.parentElement.appendChild(statusEl);
+        let el = document.getElementById('ai-pulse');
+        if (!el) {
+            el = document.createElement('div'); el.id = 'ai-pulse'; el.style.fontSize = '0.7rem'; el.style.marginTop = '5px';
+            logoSlogan.parentElement.appendChild(el);
         }
-        const isAr = state.projectInfo.language === 'ar';
-        const colors = { mapping: '#f59e0b', connected: '#10b981', error: '#f43f5e' };
-        const labels = isAr ? { mapping: 'جاري رسم خارطة الاتصال...', connected: 'البوابة الذكية متصلة', error: 'عائق في البوابة' }
-            : { mapping: 'Mapping AI Paths...', connected: 'AI Gateway Connected', error: 'Gateway Obstacle' };
-        statusEl.style.color = colors[status];
-        statusEl.innerHTML = `<span style="width:8px; height:8px; border-radius:50%; background:${colors[status]}; display:inline-block; animation: pulse 1.5s infinite;"></span> ${labels[status]} ${info}`;
+        const colors = { loading: '#f59e0b', ok: '#10b981', err: '#f43f5e' };
+        const label = status === 'loading' ? 'جاري الاتصال السحابي...' : (status === 'ok' ? 'متصل وآمن ✅' : 'عائق في الشبكة ⚠️');
+        el.style.color = colors[status];
+        el.innerHTML = `<span style="width:7px; height:7px; border-radius:50%; background:${colors[status]}; display:inline-block; animation: pulse 1s infinite;"></span> ${label} ${msg}`;
     };
 
+    // AI Gateway - The Resilience Core
     const AIGateway = {
-        async call(prompt, config = {}) {
-            updateGatewayStatus('mapping');
+        async call(prompt) {
+            showAIStatus('loading');
 
-            // محاولة الاتصال عبر الجسر أولاً (لأنه يحل مشكلة الحظر الجغرافي و Failed to fetch)
+            // 1. Try BRIDGE first (Bypasses all blocks)
             if (ATHAR_BRIDGE_URL) {
-                const bridgeRes = await this.execute('bridge', prompt, config);
-                if (bridgeRes) {
-                    updateGatewayStatus('connected', '(Cloud Bridge)');
-                    return bridgeRes;
-                }
+                const res = await this.request('bridge', prompt);
+                if (res) { showAIStatus('ok', '(Global)'); return res; }
             }
 
-            // محاولة الاتصال المباشر كخطة بديلة (تعمل فقط مع الـ VPN)
-            const directPaths = [
-                { ver: 'v1', mod: 'gemini-1.5-flash' },
-                { ver: 'v1beta', mod: 'gemini-1.5-flash' },
-                { ver: 'v1', mod: 'gemini-pro' }
+            // 2. Try DIRECT Backup (Only stable paths)
+            const backupPaths = [
+                { v: 'v1', m: 'gemini-1.5-flash' },
+                { v: 'v1beta', m: 'gemini-1.5-flash' }
             ];
 
-            for (const path of directPaths) {
-                const res = await this.execute(path, prompt, config);
-                if (res) {
-                    updateGatewayStatus('connected', `(${path.mod})`);
-                    return res;
-                }
+            for (const path of backupPaths) {
+                const res = await this.request(path, prompt);
+                if (res) { showAIStatus('ok', '(Local)'); return res; }
             }
 
-            updateGatewayStatus('error');
+            showAIStatus('err');
+            alert("⚠️ عائق شبكة حرج. يرجى التأكد من تشغيل الجسر أو الـ VPN.");
             return null;
         },
 
-        async execute(endpoint, prompt, config) {
-            let URL = "";
-            if (endpoint === 'bridge') {
-                URL = `${ATHAR_BRIDGE_URL}?key=${GEMINI_API_KEY}`;
-            } else {
-                URL = `https://generativelanguage.googleapis.com/${endpoint.ver}/models/${endpoint.mod}:generateContent?key=${GEMINI_API_KEY}`;
-            }
+        async request(target, prompt) {
+            let url = (target === 'bridge')
+                ? `${ATHAR_BRIDGE_URL}?key=${GEMINI_API_KEY}`
+                : `https://generativelanguage.googleapis.com/${target.v}/models/${target.m}:generateContent?key=${GEMINI_API_KEY}`;
 
             try {
-                const response = await fetch(URL, {
+                const response = await fetch(url, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                        contents: [{ parts: [{ text: prompt }] }],
-                        generationConfig: { temperature: 0.7, maxOutputTokens: 4096 }
-                    })
+                    body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
                 });
-
                 if (response.ok) {
                     const data = await response.json();
                     return data.candidates?.[0]?.content?.parts?.[0]?.text || data.reply || null;
                 }
                 return null;
-            } catch (e) {
-                return null;
-            }
+            } catch (e) { return null; }
         }
     };
 
-    // --- بقية وظائف الموقع (مبسطة للسرعة) ---
-    async function callAI(prompt) { return await AIGateway.call(prompt); }
-
-    function extractJSON(text) {
-        try {
-            const bracket = text.match(/(\{[\s\S]*\}|\[[\s\S]*\])/);
-            return bracket ? JSON.parse(bracket[0]) : JSON.parse(text);
-        } catch (e) { return null; }
-    }
-
+    // Navigation & UI Logic
     const goToStep = (n) => {
         state.step = n;
         document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
@@ -152,95 +83,104 @@ document.addEventListener('DOMContentLoaded', () => {
             s.classList.toggle('active', sn === n);
             s.classList.toggle('completed', sn < n);
         });
-        if (n > 1) document.querySelector('.hero-section').classList.add('hidden');
+        if (n > 1) document.querySelector('.hero-section')?.classList.add('hidden');
         window.scrollTo({ top: 0, behavior: 'smooth' });
     };
 
     document.querySelectorAll('.prevStep').forEach(b => b.onclick = () => goToStep(state.step - 1));
 
+    // Module 1: Analysis
     document.getElementById('analyzeBtn').onclick = async () => {
         const idea = document.getElementById('projectIdea').value;
-        const country = document.getElementById('country').value;
-        if (!idea) return alert('يرجى إدخال الفكرة');
+        if (!idea) return alert('يرجى وصف فكرة المشروع أولاً');
 
-        document.getElementById('analyzeBtn').innerText = 'جاري التحليل...';
-        const prompt = `حلل هذه الفكرة الإنسانية: "${idea}" في "${country}". الرد JSON: { "sector": "..", "summary": "..", "target": "..", "challenges": ".." }`;
-        const res = await callAI(prompt);
-        const data = extractJSON(res);
+        document.getElementById('analyzeBtn').innerText = 'جاري التحليل الذكي...';
+        const prompt = `حلل بدقة كخبير تنموي فكرة: "${idea}". الرد JSON: { "sector": "..", "summary": "..", "target": "..", "challenges": ".." }`;
+        const res = await AIGateway.call(prompt);
 
-        if (data) {
+        try {
+            const data = JSON.parse(res.match(/\{[\s\S]*\}/)[0]);
             state.analysis = data;
             const resArea = document.getElementById('analysisResult');
-            resArea.innerHTML = `<div class="glass-card" style="padding:20px; border:1px solid var(--accent);"><h3>${data.sector}</h3><p>${data.summary}</p><button id="nextToIdeas" class="btn btn-primary" style="margin-top:15px; width:100%">عرض الأفكار والمقترحات ✨</button></div>`;
+            resArea.innerHTML = `
+                <div class="glass-card" style="padding:20px; border:1px solid var(--accent); animation: fadeIn 0.5s;">
+                    <h3 style="color:var(--primary)">${data.sector}</h3>
+                    <p style="line-height:1.7">${data.summary}</p>
+                    <button id="nextToIdeas" class="btn btn-primary" style="margin-top:15px; width:100%">عرض المقترحات والأفكار المتوفرة ✨</button>
+                </div>`;
             resArea.style.display = 'block';
             document.getElementById('nextToIdeas').onclick = () => { generateIdeas(); goToStep(2); };
-        }
+        } catch (e) { alert("حدث خطأ في معالجة البيانات، يرجى المحاولة مرة أخرى."); }
+
         document.getElementById('analyzeBtn').innerText = 'تحليل الفكرة ⚡';
     };
 
+    // Module 2: Ideas
     async function generateIdeas() {
-        document.getElementById('ideasGrid').innerHTML = '<p style="text-align:center">جاري ابتكار خطط بديلة...</p>';
-        const prompt = `بناءً على هذا التحليل: ${JSON.stringify(state.analysis)}، اقترح 3 مشاريع إنسانية مبتكرة. الرد JSON: [ { "name": "..", "description": "..", "goal": ".." } ]`;
-        const res = await callAI(prompt);
-        const data = extractJSON(res);
-        if (data) {
-            state.ideas = data;
-            document.getElementById('ideasGrid').innerHTML = '';
+        document.getElementById('ideasGrid').innerHTML = '<div style="text-align:center; padding:40px;">جاري ابتكار مشاريع بديلة...</div>';
+        const prompt = `على ضوء التحليل: ${JSON.stringify(state.analysis)}، ولد 3 مشاريع إنسانية. الرد JSON: [ { "name": "..", "description": "..", "goal": ".." } ]`;
+        const res = await AIGateway.call(prompt);
+        try {
+            const data = JSON.parse(res.match(/\[[\s\S]*\]/)[0]);
+            const grid = document.getElementById('ideasGrid');
+            grid.innerHTML = '';
             data.forEach(idea => {
-                const div = document.createElement('div'); div.className = 'glass-card idea-card'; div.style.padding = '15px';
-                div.innerHTML = `<h4>${idea.name}</h4><p>${idea.description}</p>`;
-                div.onclick = () => {
+                const card = document.createElement('div'); card.className = 'glass-card idea-card'; card.style.padding = '20px';
+                card.innerHTML = `<h4>${idea.name}</h4><p>${idea.description}</p>`;
+                card.onclick = () => {
                     document.querySelectorAll('.idea-card').forEach(c => c.style.borderColor = 'var(--glass-border)');
-                    div.style.borderColor = 'var(--primary)'; state.selectedIdea = idea; document.getElementById('generateProposalBtn').disabled = false;
+                    card.style.borderColor = 'var(--primary)'; state.selectedIdea = idea;
+                    document.getElementById('generateProposalBtn').disabled = false;
                 };
-                document.getElementById('ideasGrid').appendChild(div);
+                grid.appendChild(card);
             });
-        }
+        } catch (e) { console.error(e); }
     }
 
+    // Module 3: Proposal
     document.getElementById('generateProposalBtn').onclick = async () => {
-        document.getElementById('proposalContent').innerHTML = '<p style="text-align:center">جاري صياغة المقترح الكامل...</p>';
+        document.getElementById('proposalContent').innerHTML = '<div style="text-align:center; padding:40px;">جاري صياغة مقترح احترافي للمانحين...</div>';
         goToStep(3);
-        const prompt = `اكتب مقترحاً كاملاً لـ "${state.selectedIdea.name}". الرد JSON أقسام: { "العنوان": "النص..." }`;
-        const res = await callAI(prompt);
-        const data = extractJSON(res);
-        if (data) {
+        const prompt = `اكتب مقترحاً كاملاً لـ "${state.selectedIdea.name}". الرد JSON حصراً بأقسام: { "العنوان": "نص مفصل..." }`;
+        const res = await AIGateway.call(prompt);
+        try {
+            const data = JSON.parse(res.match(/\{[\s\S]*\}/)[0]);
             state.proposal = data;
-            document.getElementById('proposalContent').innerHTML = '';
+            const content = document.getElementById('proposalContent');
+            content.innerHTML = '';
             for (let k in data) {
-                const d = document.createElement('div'); d.innerHTML = `<h5 style="color:var(--primary)">${k}</h5><p style="text-align:justify">${data[k]}</p><hr style="opacity:0.1">`;
-                document.getElementById('proposalContent').appendChild(d);
+                content.innerHTML += `<div style="margin-bottom:25px"><h5 style="color:var(--primary); font-weight:bold; border-right:3px solid var(--primary); padding-right:10px">${k}</h5><p style="text-align:justify; line-height:1.8">${data[k]}</p></div>`;
             }
-        }
+        } catch (e) { console.error(e); }
     };
 
+    // Module 4: Budget
     document.getElementById('goToBudgetBtn').onclick = async () => {
-        document.getElementById('budgetBody').innerHTML = '<tr><td colspan="6" style="text-align:center">جاري حساب الميزانية...</td></tr>';
+        document.getElementById('budgetBody').innerHTML = '<tr><td colspan="6" style="text-align:center; padding:30px;">جاري بناء الميزانية التقديرية...</td></tr>';
         goToStep(4);
-        const prompt = `صمم ميزانية لمشروع "${state.selectedIdea.name}". الرد JSON: [ { "name": "الفئة", "items": [ { "item": "..", "desc": "..", "qty": 1, "unit": "..", "price": 100 } ] } ]`;
-        const res = await callAI(prompt);
-        const data = extractJSON(res);
-        if (data) {
-            state.budget = data;
-            document.getElementById('budgetBody').innerHTML = ''; let total = 0;
+        const prompt = `صمم ميزانية لمشروع "${state.selectedIdea.name}". الرد JSON مصفوفة: [ { "name": "فئة", "items": [{"item":"بند","qty":1,"price":100,"unit":".."}] } ]`;
+        const res = await AIGateway.call(prompt);
+        try {
+            const data = JSON.parse(res.match(/\[[\s\S]*\]/)[0]);
+            const body = document.getElementById('budgetBody');
+            body.innerHTML = ''; let total = 0;
             data.forEach(cat => {
-                cat.items.forEach(item => {
-                    total += (item.qty * item.price);
-                    const tr = document.createElement('tr');
-                    tr.innerHTML = `<td>${item.item}</td><td>${item.desc}</td><td>${item.qty}</td><td>${item.unit}</td><td>${item.price}</td><td>${(item.qty * item.price).toLocaleString()}</td>`;
-                    document.getElementById('budgetBody').appendChild(tr);
+                cat.items.forEach(i => {
+                    total += (i.qty * i.price);
+                    body.innerHTML += `<tr><td>${i.item}</td><td>${i.item}</td><td>${i.qty}</td><td>${i.unit || 'نصيب'}</td><td>${i.price}</td><td>${(i.qty * i.price).toLocaleString()}</td></tr>`;
                 });
             });
             document.getElementById('grandTotal').innerText = total.toLocaleString() + " USD";
-        }
+        } catch (e) { console.error(e); }
     };
 
+    // Final Preview
     document.getElementById('goToExportBtn').onclick = () => {
-        let h = `<h2>${state.selectedIdea.name}</h2>`;
-        for (let k in state.proposal) h += `<h4>${k}</h4><p>${state.proposal[k]}</p>`;
+        let h = `<h2 style="text-align:center; color:var(--primary)">${state.selectedIdea.name}</h2><hr opacity="0.1">`;
+        for (let k in state.proposal) h += `<h4>${k}</h4><p style="text-align:justify">${state.proposal[k]}</p>`;
         document.getElementById('finalPreview').innerHTML = h;
         goToStep(5);
     };
 
-    updateGatewayStatus('connected');
+    showAIStatus('ok');
 });
