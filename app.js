@@ -2,6 +2,10 @@ document.addEventListener('DOMContentLoaded', () => {
     // API Key & Configuration
     const GEMINI_API_KEY = "AIzaSyCj0oDJV0MljYh1Y-NDTyur0Utvz7UPxeo";
 
+    // --- KHAS (Global Bridge Enabled) ---
+    // This allows the app to work in ANY country without a VPN
+    const ATHAR_BRIDGE_URL = "https://script.google.com/macros/s/AKfycbwJc_EWdEdwempJGlCnO7y97Bj2Kv-BfB-lA_ciKaS-6xRe1Z6SHwxFcNnMnbZ8JNjB/exec";
+
     // State management
     const state = {
         step: 1,
@@ -20,7 +24,7 @@ document.addEventListener('DOMContentLoaded', () => {
             slogan: "أثر | لأن التغيير يبدأ بخطة",
             hero: "نساعدك على تحويل فكرتك الإنسانية إلى مشروع يترك أثرًا حقيقيًا",
             analyze: "تحليل الفكرة ⚡",
-            analyzing: "قيد التنفيذ...",
+            analyzing: "جاري المعالجة...",
             nextToIdeas: "عرض الخطط والمقترحات ✨",
             ideasStep: "الأفكار",
             proposalStep: "المقترح",
@@ -34,7 +38,7 @@ document.addEventListener('DOMContentLoaded', () => {
             prev: "السابق",
             contProposal: "الاستمرار للمقترح 📝",
             prepBudget: "إعداد الميزانية 💰",
-            nextExport: "المعاينة والتصدير 📤",
+            nextExport: "المعايير والتصدير 📤",
             placeholderIdea: "اكتب وصفاً مختصراً لفكرة المشروع الإنسانية...",
             placeholderCountry: "حدد الدولة والمنطقة الجغرافية",
             labelIdea: "وصف الفكرة الإنسانية",
@@ -192,40 +196,36 @@ document.addEventListener('DOMContentLoaded', () => {
         updateGatewayStatus('connected');
     });
 
-    // --- AI GATEWAY STRATEGY (Technical Rescue Mode) ---
+    // --- AI GATEWAY STRATEGY (Universal Mode) ---
     const AIGateway = {
         bestEndpoint: null,
         lastTechError: "",
 
         async call(prompt, config = {}) {
-            const endpoints = [
+            // Priority list: Try Bridge FIRST if defined, then standard endpoints
+            const endpoints = [];
+            if (ATHAR_BRIDGE_URL) {
+                endpoints.push({ ver: 'bridge', mod: 'AI-Bridge-Relay' });
+            }
+            endpoints.push(
                 { ver: 'v1beta', mod: 'gemini-1.5-flash-latest' },
                 { ver: 'v1beta', mod: 'gemini-1.5-flash' },
                 { ver: 'v1', mod: 'gemini-1.5-flash' },
                 { ver: 'v1beta', mod: 'gemini-pro' }
-            ];
+            );
 
             this.lastTechError = "";
 
-            // 1. Connection Test (Health Check)
+            // Connection Health Check
             const isGoogleReachable = await this.testConnectivity();
-            if (!isGoogleReachable) {
-                this.lastTechError = "CRITICAL_CONNECTION_BLOCK";
+            if (!isGoogleReachable && !ATHAR_BRIDGE_URL) {
+                this.lastTechError = "GLOBAL_GEO_BLOCK";
                 updateGatewayStatus('error');
                 this.reportFailure(state.projectInfo.language);
                 return null;
             }
 
-            // 2. Try best known path first
-            if (this.bestEndpoint) {
-                const result = await this.execute(this.bestEndpoint, prompt, config);
-                if (result) {
-                    updateGatewayStatus('connected');
-                    return result;
-                }
-            }
-
-            // 3. Robust Mapping
+            // Discovery Loop
             updateGatewayStatus('mapping');
             for (const ep of endpoints) {
                 const result = await this.execute(ep, prompt, config);
@@ -243,29 +243,24 @@ document.addEventListener('DOMContentLoaded', () => {
 
         async testConnectivity() {
             try {
-                // Testing if the browser can even see Google APIs domain
-                const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 5000);
                 const test = await fetch("https://generativelanguage.googleapis.com/v1beta/models?key=" + GEMINI_API_KEY, {
-                    method: 'GET',
-                    mode: 'no-cors',
-                    signal: controller.signal
+                    method: 'GET', mode: 'no-cors'
                 });
-                clearTimeout(timeoutId);
                 return true;
             } catch (e) { return false; }
         },
 
         async execute(endpoint, prompt, config) {
-            const URL = `https://generativelanguage.googleapis.com/${endpoint.ver}/models/${endpoint.mod}:generateContent?key=${GEMINI_API_KEY}`;
+            let URL = `https://generativelanguage.googleapis.com/${endpoint.ver}/models/${endpoint.mod}:generateContent?key=${GEMINI_API_KEY}`;
+            if (endpoint.ver === 'bridge') URL = ATHAR_BRIDGE_URL;
+
             const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 35000);
+            const timeoutId = setTimeout(() => controller.abort(), 40000); // 40s
 
             try {
                 const response = await fetch(URL, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    mode: "cors",
                     signal: controller.signal,
                     body: JSON.stringify({
                         contents: [{ parts: [{ text: prompt }] }],
@@ -280,7 +275,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 if (response.ok) {
                     const data = await response.json();
-                    return data.candidates?.[0]?.content?.parts?.[0]?.text || null;
+                    return data.candidates?.[0]?.content?.parts?.[0]?.text || data.reply || null;
                 }
 
                 const err = await response.json().catch(() => ({}));
@@ -288,7 +283,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 return null;
             } catch (e) {
                 clearTimeout(timeoutId);
-                this.lastTechError = e.message === "Failed to fetch" ? "NETWORK_BLOCKADE" : e.name === 'AbortError' ? "Timeout" : e.message;
+                this.lastTechError = e.message === "Failed to fetch" ? "PROXY_REQUIRED" : e.name === 'AbortError' ? "Timeout" : e.message;
                 return null;
             }
         },
@@ -298,18 +293,14 @@ document.addEventListener('DOMContentLoaded', () => {
             let detail = this.lastTechError;
 
             let advice = "";
-            if (detail === "NETWORK_BLOCKADE" || detail === "CRITICAL_CONNECTION_BLOCK") {
+            if (detail === "PROXY_REQUIRED" || detail === "GLOBAL_GEO_BLOCK") {
                 advice = isAr
-                    ? "🚨 عائق شبكة حرج (Failed to fetch):\n\nلقد رصد نظامنا أن متصفحك يمنع الوصول لخوادم جوجل. يرجى:\n1. إيقاف مانع الإعلانات (AdBlock / uBlock) فوراً.\n2. التأكد أن الـ VPN مفعل على دولة (أمريكا/ألمانيا).\n3. إذا كنت تفتح الملف كملف محلي (file://)، يرجى رفعه على GitHub Pages ليعمل بشكل صحيح."
-                    : "🚨 Critical Network Block (Failed to fetch):\n\nOur system detected that your browser is blocking Google AI Servers. Please:\n1. Disable AdBlockers (uBlock/AdBlock) immediately.\n2. Ensure VPN is active and set to USA/Germany.\n3. If opening as a local file (file://), please upload to GitHub Pages for it to work correctly.";
-            } else if (detail.includes("location") || detail.includes("supported")) {
-                advice = isAr
-                    ? "📍 الدولة غير مدعومة:\n\nجوجل لا تسمح بالوصول من دولتك الحالية. يرجى تغيير الـ VPN إلى (الولايات المتحدة الأمريكية) ثم تحديث الصفحة."
-                    : "📍 Region Not Supported:\n\nGoogle AI is blocked in your current region. Please switch your VPN to (USA) and refresh the page.";
+                    ? "🌍 عائق جيو-تقني (حظر جغرافي):\n\nجوجل تحظر الوصول من منطقتك الحالية. لكي يعمل الموقع بدون VPN، يرجى تفعيل 'الجسر العالمي' (AI Bridge) في ملف app.js.\n\nنصيحة مؤقتة: تأكد أن الـ VPN مفعل على دولة (أمريكا/ألمانيا) وحدث الصفحة."
+                    : "🌍 Geo-Technical Obstacle (Regional Block):\n\nGoogle is blocking access from your region. To run without VPN, please enable our 'AI Bridge' in app.js.\n\nTemp Fix: Ensure VPN is set to USA/Germany and refresh.";
             } else {
                 advice = isAr
-                    ? `⚠️ عائق فني: ${detail}\n\nيرجى التأكد من أن مفتاح الـ API مفعّل وصحيح، وتأكد من استقرار الإنترنت.`
-                    : `⚠️ Technical Obstacle: ${detail}\n\nEnsure your API key is active and check your internet stability.`;
+                    ? `⚠️ عائق فني: ${detail}\n\nيرجى فتح الموقع عبر GitHub Pages لضمان الاستقرار.`
+                    : `⚠️ Technical Obstacle: ${detail}\n\nPlease open the site via GitHub Pages for better stability.`;
             }
 
             alert(advice);
@@ -478,7 +469,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (generateProposalBtn) {
         generateProposalBtn.onclick = async () => {
-            generateProposalBtn.innerText = i18n[state.projectInfo.language].analyzing;
+            generateProposalBtn.innerText = i18n[state.projectInfo.language].analyze;
             generateProposalBtn.disabled = true;
             await generateFullProposal();
             generateProposalBtn.innerText = i18n[state.projectInfo.language].contProposal;
@@ -570,7 +561,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const budgetNavBtn = document.getElementById('goToBudgetBtn');
     if (budgetNavBtn) {
         budgetNavBtn.onclick = async () => {
-            budgetNavBtn.innerText = i18n[state.projectInfo.language].analyzing;
+            budgetNavBtn.innerText = i18n[state.projectInfo.language].analyze;
             budgetNavBtn.disabled = true;
             await generateBudget();
             budgetNavBtn.innerText = i18n[state.projectInfo.language].prepBudget;
