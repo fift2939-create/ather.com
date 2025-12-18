@@ -13,6 +13,8 @@
         href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&family=Cairo:wght@400;600;700;900&display=swap"
         rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html-docx-js/0.3.1/html-docx.js"></script>
     <link rel="stylesheet" href="style.css">
     <style>
         body {
@@ -149,8 +151,12 @@
                 <div id="ideasGrid" style="display: grid; grid-template-columns: 1fr; gap: 20px;">
                     <!-- Ideas cards will be injected here -->
                 </div>
-                <div style="display: flex; justify-content: space-between; margin-top: 30px;">
-                    <button class="btn btn-ghost prevStep">السابق</button>
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 30px;">
+                    <div style="display: flex; gap: 10px;">
+                        <button class="btn btn-ghost prevStep">السابق</button>
+                        <button id="regenerateIdeasBtn" class="btn btn-ghost"
+                            style="color: var(--primary); border-color: var(--primary);">💡 غير ذلك</button>
+                    </div>
                     <button id="generateProposalBtn" class="btn btn-primary" disabled>الاستمرار للمقترح 📝</button>
                 </div>
             </section>

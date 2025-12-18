@@ -1,7 +1,6 @@
 document.addEventListener('DOMContentLoaded', () => {
     // API Key & Configuration
     const GEMINI_API_KEY = "AIzaSyCG6oe58UYnyF2Rjr3wnIiHFoynvpFprHk";
-    const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`;
 
     // State management
     const state = {
@@ -49,7 +48,8 @@ document.addEventListener('DOMContentLoaded', () => {
             loadingBudget: "جاري إعداد بنود الميزانية...",
             saveLocally: "💾 حفظ المشروع محلياً",
             savedSuccess: "تم حفظ المشروع بنجاح في ذاكرة المتصفح!",
-            chartTitle: "توزيع الميزانية"
+            chartTitle: "توزيع الميزانية",
+            otherIdeas: "💡 غير ذلك"
         },
         en: {
             slogan: "Athar | Because Change Starts with a Plan",
@@ -83,7 +83,8 @@ document.addEventListener('DOMContentLoaded', () => {
             loadingBudget: "Preparing budget items...",
             saveLocally: "💾 Save Locally",
             savedSuccess: "Project saved successfully!",
-            chartTitle: "Budget Allocation"
+            chartTitle: "Budget Allocation",
+            otherIdeas: "💡 Others"
         }
     };
 
@@ -102,6 +103,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const currencySelect = document.getElementById('currency');
     const viewSavedProjectsBtn = document.getElementById('viewSavedProjects');
     const saveProjectBtn = document.getElementById('saveProjectBtn');
+    const regenerateIdeasBtn = document.getElementById('regenerateIdeasBtn');
+    const smartEditBtn = document.getElementById('smartEditBtn');
+    const chatSidebar = document.getElementById('chatSidebar');
+    const sendChatBtn = document.getElementById('sendChatBtn');
+    const chatInput = document.getElementById('chatInput');
 
     // i18n Update function
     const updateLanguage = (lang) => {
@@ -131,6 +137,7 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('goToExportBtn').innerText = t.nextExport;
         document.getElementById('smartEditBtn').innerText = t.smartEdit;
         saveProjectBtn.innerText = t.saveLocally;
+        regenerateIdeasBtn.innerText = t.otherIdeas;
     };
 
     languageSelect.addEventListener('change', (e) => {
@@ -138,21 +145,92 @@ document.addEventListener('DOMContentLoaded', () => {
         updateLanguage(state.projectInfo.language);
     });
 
-    // AI Call Wrapper
-    async function callGemini(prompt) {
+    // AI Call Wrapper - Simplified for maximum reliability
+    async function callGemini(prompt, config = {}) {
+        const URL = `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`;
+
         try {
-            const response = await fetch(GEMINI_URL, {
+            const response = await fetch(URL, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                     contents: [{ parts: [{ text: prompt }] }],
-                    generationConfig: { temperature: 0.7, maxOutputTokens: 2048 }
+                    generationConfig: {
+                        temperature: config.temperature || 0.7,
+                        maxOutputTokens: config.maxTokens || 4096,
+                    }
                 })
             });
+
+            if (!response.ok) {
+                const errorJson = await response.json().catch(() => ({}));
+                const msg = errorJson.error?.message || "";
+
+                // Fallback to gemini-pro if flash is not found
+                if (response.status === 404 || msg.toLowerCase().includes("not found")) {
+                    console.warn("Flash not found, trying gemini-pro...");
+                    const fallbackURL = `https://generativelanguage.googleapis.com/v1/models/gemini-pro:generateContent?key=${GEMINI_API_KEY}`;
+                    const fallbackResponse = await fetch(fallbackURL, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            contents: [{ parts: [{ text: prompt }] }],
+                            generationConfig: {
+                                temperature: config.temperature || 0.7,
+                                maxOutputTokens: config.maxTokens || 4096,
+                            }
+                        })
+                    });
+
+                    if (fallbackResponse.ok) {
+                        const fallbackData = await fallbackResponse.json();
+                        return fallbackData.candidates[0].content.parts[0].text;
+                    }
+                }
+
+                throw new Error(msg || `HTTP ${response.status}`);
+            }
+
             const data = await response.json();
+            if (!data.candidates || !data.candidates[0].content) {
+                throw new Error("Empty AI Response");
+            }
+
             return data.candidates[0].content.parts[0].text;
+
         } catch (error) {
-            console.error("Gemini API Error:", error);
+            console.error("AI Connection Detail:", error);
+            const isNetworkError = error.message === 'Failed to fetch';
+
+            const msg = isNetworkError
+                ? (state.projectInfo.language === 'ar' ? "فشل الاتصال بالخادم. يرجى التأكد من الإنترنت أو تجرب متصفح آخر." : "Network Error: Please check your internet or try another browser.")
+                : error.message;
+
+            alert(state.projectInfo.language === 'ar' ?
+                `⚠️ عائق فني: ${msg}\n\nنصيحة: إذا كنت تشغل الملف محلياً، قد يحظره المتصفح. جرب فتحه في Chrome أو Edge.` :
+                `⚠️ Technical Obstacle: ${msg}\n\nTip: Browsers may block local file requests. Try Chrome or Edge.`);
+
+            return null;
+        }
+    }
+
+    // Robust JSON Extractor Helper
+    function extractJSON(text) {
+        try {
+            // Try to find content between ```json and ```
+            const codeBlockMatch = text.match(/```json\s*([\s\S]*?)\s*```/);
+            if (codeBlockMatch && codeBlockMatch[1]) {
+                return JSON.parse(codeBlockMatch[1].trim());
+            }
+            // Try to find content between { } or [ ]
+            const bracketMatch = text.match(/(\{[\s\S]*\}|\[[\s\S]*\])/);
+            if (bracketMatch && bracketMatch[0]) {
+                return JSON.parse(bracketMatch[0].trim());
+            }
+            // Direct parse as last resort
+            return JSON.parse(text.trim());
+        } catch (e) {
+            console.error("JSON Extraction failed:", e, "Text:", text);
             return null;
         }
     }
@@ -207,21 +285,22 @@ document.addEventListener('DOMContentLoaded', () => {
         analyzeBtn.innerHTML = t.analyzing;
         analyzeBtn.disabled = true;
 
-        const prompt = `أنت خبير في كتابة المشاريع الإنسانية. حلل فكرة المشروع التالية: "${state.projectInfo.idea}" في الدولة: "${state.projectInfo.country}" باللغة: "${state.projectInfo.language === 'ar' ? 'العربية' : 'الإنجليزية'}". 
+        const prompt = `أنت خبير في كتابة المشاريع الإنسانية والتحليل التنموي. حلل الفكرة التالية بدقة واقعية: "${state.projectInfo.idea}" في الدولة: "${state.projectInfo.country}" باللغة: "${state.projectInfo.language === 'ar' ? 'العربية' : 'الإنجليزية'}". 
+        اعتمد على بيانات جغرافية واجتماعية حقيقية لهذه المنطقة.
         قم بالرد بتنسيق JSON حصراً كالتالي:
-        { "sector": "القطاع", "target": "الفئة المستهدفة", "challenges": "التحديات", "summary": "ملخص تحليلي عميق" }`;
+        { "sector": "القطاع الإنساني بدقة", "target": "الفئة المستهدفة الحقيقية", "challenges": "التحديات اللوجستية والبيئية في المنطقة", "summary": "ملخص تحليلي استراتيجي للموقف" }`;
 
-        const response = await callGemini(prompt);
+        const response = await callGemini(prompt, { temperature: 0.5 });
         let analysis;
         if (response) {
-            try {
-                const cleaned = response.replace(/```json|```/g, '').trim();
-                analysis = JSON.parse(cleaned);
-            } catch (e) {
-                analysis = simulateAnalysis(state.projectInfo);
-            }
-        } else {
-            analysis = simulateAnalysis(state.projectInfo);
+            analysis = extractJSON(response);
+        }
+
+        if (!analysis) {
+            alert(state.projectInfo.language === 'ar' ? 'فشل الاتصال بالذكاء الاصطناعي. يرجى المحاولة مرة أخرى.' : 'AI Connection failed. Please try again.');
+            analyzeBtn.innerHTML = t.analyze;
+            analyzeBtn.disabled = false;
+            return;
         }
 
         state.analysis = analysis;
@@ -253,20 +332,23 @@ document.addEventListener('DOMContentLoaded', () => {
             <p style="margin-bottom: 20px;">${t.loadingIdeas}</p>
         </div>`;
 
-        const prompt = `بناءً على التحليل: ${JSON.stringify(state.analysis)}، اقترح من 3 إلى 5 أفكار مشاريع إنسانية مطورة واحترافية باللغة ${lang}. 
-        يجب أن يكون الرد JSON حصراً: [ { "name": "اسم المشروع", "description": "وصف تفصيلي", "goal": "الهدف الاستراتيجي" } ]`;
+        const prompt = `ابتكر من 3 إلى 5 أفكار مشاريع إنسانية حقيقية ومبتكرة تماماً بناءً على هذا التحليل السيادي: ${JSON.stringify(state.analysis)} في منطقة ${state.projectInfo.country} باللغة ${lang}.
+        مهم جداً: لا تكرر الأفكار السابقة، ابحث عن حلول خارج الصندوق (مثلاً: حلول طاقة شمسية، زراعة ذكية، منصات تعليمية، تمكين تقني).
+        يجب أن تكون المشاريع واقعية وتلبي احتياجات ملموسة.
+        يجب أن يكون الرد JSON حصراً: [ { "name": "اسم المشروع المبتكر", "description": "وصف تقني وعملي مفصل", "goal": "الأثر المتوقع القابل للقياس" } ]`;
 
-        const response = await callGemini(prompt);
+        const response = await callGemini(prompt, { temperature: 0.8 });
         let ideas;
         if (response) {
-            try {
-                const cleaned = response.replace(/```json|```/g, '').trim();
-                ideas = JSON.parse(cleaned);
-            } catch (e) {
-                ideas = simulateIdeas(state.projectInfo);
-            }
-        } else {
-            ideas = simulateIdeas(state.projectInfo);
+            ideas = extractJSON(response);
+        }
+
+        if (!ideas || !Array.isArray(ideas)) {
+            ideasGrid.innerHTML = `<div style="grid-column: 1/-1; text-align:center; padding: 40px; color: var(--danger);">
+                <p>${lang === 'ar' ? 'فشل في توليد أفكار جديدة. يرجى الضغط على "غير ذلك" للمحاولة مجدداً.' : 'Failed to generate ideas. Please click "Others" to retry.'}</p>
+                <button class="btn btn-primary" onclick="generateIdeas()">${lang === 'ar' ? 'إعادة المحاولة' : 'Retry'}</button>
+            </div>`;
+            return;
         }
 
         state.ideas = ideas;
@@ -296,6 +378,10 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    regenerateIdeasBtn.onclick = () => {
+        generateIdeas();
+    };
+
     generateProposalBtn.onclick = async () => {
         generateProposalBtn.innerText = i18n[state.projectInfo.language].analyzing;
         generateProposalBtn.disabled = true;
@@ -312,28 +398,19 @@ document.addEventListener('DOMContentLoaded', () => {
         proposalContent.innerHTML = `<p style="text-align:center; padding: 40px;">${t.loadingProposal}</p>`;
 
         const prompt = `أنت كاتب مقترحات مشاريع إنسانية محترف. صغ مقترحاً متكاملاً، مُقنعاً، ومحفزاً جداً للمانحين لمشروع "${state.selectedIdea.name}" في "${state.projectInfo.country}" باللغة ${lang}. 
-        استخدم لغة قوية تبرز الأثر الإنساني العميق والضرورة القصوى للتدخل.
+        استخدم لغة قوية تبرز الأثر الإنساني العميق والضرورة القصوى للتدخل بناءً على الواقع الحالي في ${state.projectInfo.country}.
         يجب أن يحتوي المقترح على الأقسام التالية: (الملخص التنفيذي، الخلفية والاحتياج، بيان المشكلة، الأهداف الاستراتيجية، الفئات المستهدفة، الأنشطة الميدانية، المنهجية، النتائج المتوقعة، الاستدامة، المخاطر، الخاتمة المحفزة).
-        الرد بصيغة JSON حصراً كالتالي: { "اسم القسم": "محتوى احترافي ومحفز" }`;
+        الرد بصيغة JSON حصراً كالتالي: { "اسم القسم": "محتوى احترافي ومحفز ومفصل" }`;
 
-        const response = await callGemini(prompt);
+        const response = await callGemini(prompt, { temperature: 0.8 });
         let proposal;
         if (response) {
-            try {
-                // Try to extract JSON if Gemini returned markdown-wrapped JSON
-                const jsonMatch = response.match(/\{[\s\S]*\}/);
-                const cleaned = jsonMatch ? jsonMatch[0] : response;
-                proposal = JSON.parse(cleaned);
-            } catch (e) {
-                console.warn("Falling back to simulated proposal due to parsing error");
-                proposal = simulateProposal(state.selectedIdea, state.projectInfo.country, lang);
-            }
-        } else {
-            proposal = simulateProposal(state.selectedIdea, state.projectInfo.country, lang);
+            proposal = extractJSON(response);
         }
 
         if (!proposal || Object.keys(proposal).length === 0) {
-            proposal = simulateProposal(state.selectedIdea, state.projectInfo.country, lang);
+            alert(lang === 'ar' ? 'حدث خطأ في صياغة المقترح. سيتم إعادة المحاولة...' : 'Error drafting proposal. Retrying...');
+            return generateFullProposal();
         }
 
         state.proposal = proposal;
@@ -344,12 +421,65 @@ document.addEventListener('DOMContentLoaded', () => {
             div.style.marginBottom = '35px';
             div.style.animation = 'fadeIn 0.6s ease-out';
             div.innerHTML = `
-                <h4 style="color: var(--primary); border-right: 5px solid var(--primary); padding-right: 18px; margin-bottom: 15px; font-weight: 800; font-size: 1.1rem;">${section}</h4>
-                <div contenteditable="true" data-key="${section}" style="white-space: pre-line; line-height: 1.9; color: var(--text-primary); text-align: justify; padding: 10px; border-radius: 8px; background: rgba(255,255,255,0.01);">${proposal[section]}</div>
-            `;
+                    <h4 style="color: var(--primary); border-right: 5px solid var(--primary); padding-right: 18px; margin-bottom: 15px; font-weight: 800; font-size: 1.1rem;">${section}</h4>
+                    <div contenteditable="true" data-key="${section}" class="proposal-edit-area" style="white-space: pre-line; line-height: 1.9; color: var(--text-primary); text-align: justify; padding: 10px; border-radius: 8px; background: rgba(255,255,255,0.01);">${proposal[section]}</div>
+                `;
             proposalContent.appendChild(div);
         }
+
+        // Sync edits back to state
+        proposalContent.querySelectorAll('.proposal-edit-area').forEach(div => {
+            div.oninput = () => {
+                const key = div.getAttribute('data-key');
+                state.proposal[key] = div.innerText;
+            };
+        });
     }
+
+    // Smart Edit Functionalilty
+    smartEditBtn.onclick = () => {
+        chatSidebar.style.display = chatSidebar.style.display === 'none' ? 'block' : 'none';
+    };
+
+    sendChatBtn.onclick = async () => {
+        const instruction = chatInput.value.trim();
+        if (!instruction) return;
+
+        sendChatBtn.innerText = i18n[state.projectInfo.language].analyzing;
+        sendChatBtn.disabled = true;
+
+        const currentProposal = JSON.stringify(state.proposal);
+        const prompt = `أنت خبير في تطوير المشاريع الإنسانية. 
+        بناءً على هذا المقترح الحالي: ${currentProposal}
+        نفذ الطلب التالي لتعديله وتطويره: "${instruction}"
+        يجب أن تحافظ على نفس هيكل الـ JSON المكون من (أقسام: محتوى) وتحدث الأقسام المطلوبة فقط أو أضف أقساماً جديدة إذا لزم الأمر.
+        الرد JSON حصراً.`;
+
+        const response = await callGemini(prompt);
+        if (response) {
+            const updatedProposal = extractJSON(response);
+            if (updatedProposal) {
+                state.proposal = updatedProposal;
+                // Re-render proposalContent
+                proposalContent.innerHTML = '';
+                for (const section in state.proposal) {
+                    const div = document.createElement('div');
+                    div.className = 'proposal-sec bounce-in';
+                    div.style.marginBottom = '35px';
+                    div.innerHTML = `
+                        <h4 style="color: var(--primary); border-right: 5px solid var(--primary); padding-right: 18px; margin-bottom: 15px; font-weight: 800; font-size: 1.1rem;">${section}</h4>
+                        <div contenteditable="true" data-key="${section}" style="white-space: pre-line; line-height: 1.9; color: var(--text-primary); text-align: justify; padding: 10px; border-radius: 8px; background: rgba(255,255,255,0.01);">${state.proposal[section]}</div>
+                    `;
+                    proposalContent.appendChild(div);
+                }
+                chatInput.value = '';
+                chatSidebar.style.display = 'none';
+            }
+        }
+
+        sendChatBtn.innerText = 'تطبيق التعديلات';
+        sendChatBtn.disabled = false;
+    };
 
     // Module 4: Budget
     document.getElementById('goToBudgetBtn').onclick = async () => {
@@ -366,26 +496,22 @@ document.addEventListener('DOMContentLoaded', () => {
         const t = i18n[lang];
         budgetBody.innerHTML = `<tr><td colspan="6" style="text-align:center; padding:40px;">${t.loadingBudget}</td></tr>`;
 
-        const prompt = `صمم ميزانية تفصيلية لمشروع "${state.selectedIdea.name}" بالعملة "${state.projectInfo.currency}" واللغة "${lang}". 
+        const prompt = `صمم ميزانية تفصيلية وواقعية لمشروع "${state.selectedIdea.name}" في "${state.projectInfo.country}" بالعملة "${state.projectInfo.currency}" واللغة "${lang}". 
+        يجب أن تعكس الأسعار والتكاليف الواقعية في المنطقة.
         يجب تصنيفها إلى: (الموارد البشرية، الأنشطة الميدانية، التكاليف التشغيلية). 
-        الرد JSON: [ { "name": "اسم الفئة", "items": [ { "item": "البند", "desc": "الوصف", "qty": 10, "unit": "الوحدة", "price": 100 } ] } ]`;
+        الرد JSON حصراً: [ { "name": "اسم الفئة", "items": [ { "item": "البند", "desc": "الوصف", "qty": 10, "unit": "الوحدة", "price": 100 } ] } ]`;
 
-        const response = await callGemini(prompt);
+        const response = await callGemini(prompt, { temperature: 0.5 });
         let categories;
         if (response) {
-            try {
-                const jsonMatch = response.match(/\[[\s\S]*\]/);
-                const cleaned = jsonMatch ? jsonMatch[0] : response;
-                categories = JSON.parse(cleaned);
-            } catch (e) {
-                categories = simulateBudgetCategories(lang);
-            }
-        } else {
-            categories = simulateBudgetCategories(lang);
+            categories = extractJSON(response);
         }
 
         if (!categories || categories.length === 0) {
-            categories = simulateBudgetCategories(lang);
+            alert(lang === 'ar' ? 'فشل توليد الميزانية. يرجى المحاولة مرة أخرى.' : 'Budget generation failed.');
+            document.getElementById('goToBudgetBtn').innerText = t.prepBudget;
+            document.getElementById('goToBudgetBtn').disabled = false;
+            return;
         }
 
         state.budget = categories;
@@ -450,8 +576,10 @@ document.addEventListener('DOMContentLoaded', () => {
             </div>
         `;
         document.querySelectorAll('.proposal-sec').forEach(sec => {
-            html += `<h3 style="color: #4f46e5; border-right: 5px solid #4f46e5; padding-right: 15px; margin: 30px 0 15px;">${sec.querySelector('h4').innerText}</h3>`;
-            html += `<p style="line-height:1.8; text-align:justify;">${sec.querySelector('p').innerText}</p>`;
+            const title = sec.querySelector('h4').innerText;
+            const content = sec.querySelector('.proposal-edit-area').innerText;
+            html += `<h3 style="color: #4f46e5; border-right: 5px solid #4f46e5; padding-right: 15px; margin: 30px 0 15px;">${title}</h3>`;
+            html += `<p style="line-height:1.8; text-align:justify; color: #334155;">${content}</p>`;
         });
         finalPreview.innerHTML = html;
     }
@@ -524,23 +652,51 @@ document.addEventListener('DOMContentLoaded', () => {
     function renderSavedProjects() {
         const grid = document.getElementById('savedProjectsGrid');
         const projects = JSON.parse(localStorage.getItem('athar_projects') || '[]');
-        grid.innerHTML = projects.length ? '' : '<p style="grid-column: 1/-1; text-align:center;">لا توجد مشاريع محفوظة حالياً</p>';
+
+        // Use the new grid class
+        grid.className = 'saved-projects-grid';
+        grid.innerHTML = projects.length ? '' : '<p style="grid-column: 1/-1; text-align:center; padding: 40px; color: var(--text-secondary);">لا توجد مشاريع محفوظة حالياً. ابدأ بإنشاء مشروعك الأول!</p>';
 
         projects.reverse().forEach(p => {
             const card = document.createElement('div');
-            card.className = 'glass-card';
-            card.style.padding = '20px';
+            card.className = 'saved-card';
+            card.style.padding = '24px';
             card.innerHTML = `
-                <h4 style="color: var(--primary); margin-bottom: 10px;">${p.idea.name}</h4>
-                <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 15px;">📅 ${new Date(p.date).toLocaleDateString()}</p>
-                <div style="display:flex; justify-content:space-between;">
-                    <button class="btn btn-ghost btn-sm" onclick="alert('جاري التحميل...')">📄 استعراض</button>
-                    <button class="btn btn-ghost btn-sm" style="color:var(--danger);" onclick="deleteProject(${p.id})">🗑️ حذف</button>
+                <div style="margin-bottom: 20px;">
+                    <h4 style="color: var(--primary); margin-bottom: 8px; font-size: 1.1rem; line-height: 1.4;">${p.idea.name}</h4>
+                    <div style="display: flex; align-items: center; gap: 8px; font-size: 0.8rem; color: var(--text-secondary);">
+                        <span>📅 ${new Date(p.date).toLocaleDateString(p.info.language)}</span>
+                        <span>•</span>
+                        <span>📍 ${p.info.country}</span>
+                    </div>
+                </div>
+                <div style="display:flex; justify-content:space-between; gap: 12px; border-top: 1px solid var(--glass-border); padding-top: 15px;">
+                    <button class="btn btn-primary btn-sm" style="flex: 1; justify-content: center;" onclick="loadProject(${p.id})">استعراض المشروع</button>
+                    <button class="btn btn-ghost btn-sm" style="color:var(--danger); border-color: var(--danger); width: 45px; justify-content: center;" title="حذف" onclick="deleteProject(${p.id})">🗑️</button>
                 </div>
             `;
             grid.appendChild(card);
         });
     }
+
+    window.loadProject = (id) => {
+        const projects = JSON.parse(localStorage.getItem('athar_projects') || '[]');
+        const project = projects.find(p => p.id === id);
+        if (!project) return;
+
+        state.projectInfo = project.info;
+        state.selectedIdea = project.idea;
+        state.proposal = project.proposal;
+        state.budget = project.budget;
+
+        // Re-render components with the loaded data
+        renderFinalPreview();
+        renderAnalytics();
+        renderBudget();
+
+        // Navigate to the final preview step
+        goToStep(5);
+    };
 
     window.deleteProject = (id) => {
         let projects = JSON.parse(localStorage.getItem('athar_projects') || '[]');
@@ -549,117 +705,94 @@ document.addEventListener('DOMContentLoaded', () => {
         renderSavedProjects();
     };
 
-    // Export Logic
-    document.getElementById('exportWordBtn').onclick = async () => {
+    // Export Logic (Client-Side for GitHub Compatibility)
+    document.getElementById('exportWordBtn').onclick = () => {
         const btn = document.getElementById('exportWordBtn');
-        btn.innerText = 'جاري التصدير...';
+        const originalText = btn.innerText;
+        btn.innerText = 'جاري المعالجة...';
+
         try {
-            const response = await fetch('http://localhost:3000/api/export/word', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    proposal: state.proposal,
-                    selectedIdea: state.selectedIdea,
-                    projectInfo: state.projectInfo
-                })
-            });
-            const blob = await response.blob();
-            const url = window.URL.createObjectURL(blob);
-            const a = document.createElement('a'); a.href = url; a.download = `${state.selectedIdea.name}.docx`; a.click();
-        } finally { btn.innerText = 'تصدير Word (.docx)'; }
-    };
+            const content = `
+                <!DOCTYPE html>
+                <html lang="${state.projectInfo.language}" dir="${state.projectInfo.language === 'ar' ? 'rtl' : 'ltr'}">
+                <head>
+                    <meta charset="UTF-8">
+                    <style>
+                        body { font-family: 'Arial', sans-serif; padding: 50px; }
+                        h1 { color: #1e293b; text-align: center; border-bottom: 2px solid #6366f1; padding-bottom: 20px; }
+                        h3 { color: #4f46e5; border-right: 5px solid #4f46e5; padding-right: 15px; margin-top: 30px; }
+                        p { text-align: justify; line-height: 1.6; color: #334155; }
+                        .footer { margin-top: 50px; text-align: center; font-size: 12px; color: #94a3b8; border-top: 1px solid #eee; padding-top: 20px; }
+                    </style>
+                </head>
+                <body>
+                    ${finalPreview.innerHTML}
+                    <div class="footer">
+                        تم إنشاء هذا المقترح عبر منصة أثر للمشاريع الإنسانية - 2025
+                    </div>
+                </body>
+                </html>
+            `;
 
-    document.getElementById('exportExcelBtn').onclick = async () => {
-        const btn = document.getElementById('exportExcelBtn');
-        btn.innerText = 'جاري التصدير...';
-        try {
-            const response = await fetch('http://localhost:3000/api/export/excel', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ budget: state.budget, projectInfo: state.projectInfo })
-            });
-            const blob = await response.blob();
-            const url = window.URL.createObjectURL(blob);
-            const a = document.createElement('a'); a.href = url; a.download = `Budget_${state.projectInfo.currency}.xlsx`; a.click();
-        } finally { btn.innerText = 'تصدير Excel (.xlsx)'; }
-    };
-
-    // Simulation Fallbacks
-    function simulateAnalysis(i) {
-        return { sector: "التنمية المستدامة", target: "الأسر المتعففة", challenges: "ضعف الإمكانيات", summary: "مشروع حيوي يتطلب تدخل عاجل بناءً على المسح الميداني الأولي." };
-    }
-
-    function simulateIdeas(info) {
-        const isAr = info.language === 'ar';
-        return [
-            {
-                name: isAr ? "تحسين سبل العيش المستدام (سبُل)" : "Sustainable Livelihood Improvement (SOBOL)",
-                description: isAr ? "برنامج متكامل لتمكين الأسر اقتصادياً عبر التدريب المهني وتزويدهم بأدوات الإنتاج (حقائب مهنية) لبدء مشاريع صغيرة مدرة للدخل." : "An integrated program for family economic empowerment through vocational training and production tools provision.",
-                goal: isAr ? "تحويل 100 أسرة من الاعتماد على المساعدات إلى الانتاج المستقل." : "Transitioning 100 families from aid dependency to independent production."
-            },
-            {
-                name: isAr ? "أكاديمية أثر للمهارات الرقمية" : "Athar Digital Skills Academy",
-                description: isAr ? "منصة لتدريب الشباب على مهن المستقبل مثل البرمجة والتصميم الجرافيكي، والعمل الحر عبر الإنترنت لكسر قيود البطالة الجغرافية." : "A platform to train youth on future jobs like coding and graphic design to overcome geographical unemployment.",
-                goal: isAr ? "تمكين 250 شاب وشابة من الحصول على فرص عمل دولية عبر الإنترنت." : "Empowering 250 youth to secure international remote work opportunities."
-            },
-            {
-                name: isAr ? "مبادرة الأمن الغذائي المنزلي" : "Home Food Security Initiative",
-                description: isAr ? "تحويل أسطح المنازل والمساحات الصغيرة إلى وحدات إنتاج غذائي مصغرة (زراعة مائية) لضمان توفر الاحتياجات الأساسية وعائد إضافي." : "Transforming rooftops into food production units (hydroponics) to ensure basic needs and extra income.",
-                goal: isAr ? "تحقيق الاكتفاء الذاتي الغذائي لـ 50 أسرة محرومة في المنطقة." : "Achieving food self-sufficiency for 50 deprived families in the region."
-            }
-        ];
-    }
-
-    function simulateProposal(idea, country, lang) {
-        const isAr = lang === 'ar';
-        if (isAr) {
-            return {
-                "1. الملخص التنفيذي للمشروع": `نحن نقف اليوم أمام فرصة تاريخية لإحداث تحول حقيقي في حياة المتضررين في ${country}. إن مشروع "${idea.name}" ليس مجرد خطة عمل، بل هو صرخة أمل وجسر نحو مستقبل أفضل. نهدف من خلاله إلى ${idea.goal} عبر آليات تمكين مبتكرة تتجاوز مجرد الدعم المؤقت إلى التنمية المستدامة والشاملة.`,
-                "2. الضرورة القصوى والاحتياج": `البيانات الميدانية في ${country} تتحدث عن واقع يتطلب تدخلاً عاجلاً لا يحتمل التأجيل. تعاني العائلات من فجوات معيشية حادة تهدد استقرارها الأساسي، مما يجعل من هذا المشروع ضرورة أخلاقية وتنموية لإنقاذ الكرامة الإنسانية.`,
-                "3. تحدي المشروع وكسر الجمود": `لقد سئم الناس من الحلول السطحية. مشروعنا يأتي ليعالج "جذور المشكلة" المتمثلة في انعدام الفرص، محولاً اليأس إلى طاقة منتجة من خلال تمليك المستهدفين أدوات صناعة مستقبلهم بأيديهم.`,
-                "4. الرؤية والأهداف الاستراتيجية": `نسعى لتحقيق أثر ملموس وقابل للقياس يتلخص في:\n• رؤية شاملة: خلق مجتمعات مرنة قادرة على الصمود.\n• أهداف محددة: تمكين 100 أسرة، بناء قدرات مهنية عالمية، وضمان استدامة الدخل بنسبة 100%.`,
-                "5. خارطة الطريق والأنشطة": `استراتيجيتنا تعتمد على "التغيير المتسارع" من خلال:\n• ورش عمل تقنية مكثفة.\n• تسليم حزم التمكين المتكاملة.\n• مرافقة المستفيدين ببرامج توجيه احترافية لضمان النجاح.`,
-                "6. فلسفة الاستدامة والأثر": `سر تميزنا يكمن في "الخروج الآمن"، حيث نترك وراءنا مستفيدين منتجين، وجمعيات محلية قوية، وبيئة اقتصادية حيوية لا تعتمد على المساعدات بعد اليوم.`,
-                "7. دعوة للمشاركة في الأثر": `إن استثماركم في مشروع "${idea.name}" في ${country} هو استثمار في كرامة الإنسان. معاً، لا نقدم سمكة، بل نعيد صياغة مفهوم الصيد ليكون المحرك الجديد للمستقبل.`
-            };
+            const converted = htmlDocx.asBlob(content);
+            const url = URL.createObjectURL(converted);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `${state.selectedIdea.name}.docx`;
+            a.click();
+            URL.revokeObjectURL(url);
+        } catch (error) {
+            console.error("Word Export Error:", error);
+            alert("حدث خطأ أثناء تصدير ملف Word. يرجى المحاولة مرة أخرى.");
+        } finally {
+            btn.innerText = originalText;
         }
-        return {
-            "1. Executive Motivation": `We stand today before a historic opportunity to create real transformation in ${country}. The "${idea.name}" project is not just a plan; it's a beacon of hope and a bridge to a better future.`,
-            "2. Critical Need": `Field data in ${country} reveals a reality that demands immediate intervention. Families face severe living gaps that threaten basic stability.`,
-            "3. Conclusion": `Your investment in "${idea.name}" is an investment in human dignity. Together, we can rebuild futures.`
-        };
-    }
+    };
 
-    function simulateBudgetCategories(l) {
-        const isAr = l === 'ar';
-        const HR = isAr ? 'الموارد البشرية' : 'Human Resources';
-        const ACT = isAr ? 'أنشطة المشروع' : 'Project Activities';
-        const OPS = isAr ? 'التكاليف التشغيلية' : 'Operational Costs';
+    document.getElementById('exportExcelBtn').onclick = () => {
+        const btn = document.getElementById('exportExcelBtn');
+        const originalText = btn.innerText;
+        btn.innerText = 'جاري التجهيز...';
 
-        return [
-            {
-                name: HR,
-                items: [
-                    { item: isAr ? 'مدير مشروع' : 'Project Manager', desc: isAr ? 'إشراف كامل وتنسيق' : 'Full supervision', qty: 1, unit: isAr ? 'شهر' : 'Month', price: 1500 },
-                    { item: isAr ? 'منسق ميداني' : 'Field Coordinator', desc: isAr ? 'متابعة التنفيذ' : 'Field follow-up', qty: 2, unit: isAr ? 'شهر' : 'Month', price: 1000 }
-                ]
-            },
-            {
-                name: ACT,
-                items: [
-                    { item: isAr ? 'دورات تدريبية' : 'Training Workshops', desc: isAr ? 'تأهيل مهني' : 'Skills training', qty: 5, unit: isAr ? 'دورة' : 'Course', price: 800 },
-                    { item: isAr ? 'حقائب التمكين' : 'Empowerment Kits', desc: isAr ? 'أدوات إنتاج' : 'Production tools', qty: 100, unit: isAr ? 'حقيبة' : 'Kit', price: 350 }
-                ]
-            },
-            {
-                name: OPS,
-                items: [
-                    { item: isAr ? 'إيجار مركز التدريب' : 'Rent', desc: isAr ? 'مساحة تنفيذ' : 'Execution space', qty: 1, unit: isAr ? 'مقطوع' : 'Lump', price: 1200 },
-                    { item: isAr ? 'اتصالات وإنترنت' : 'Comms', desc: isAr ? 'تنسيق إداري' : 'Coordination', qty: 4, unit: isAr ? 'شهر' : 'Month', price: 100 }
-                ]
-            }
-        ];
-    }
+        try {
+            const workbook = XLSX.utils.book_new();
+            const data = [
+                ["تقرير ميزانية المشروع"],
+                ["اسم المشروع:", state.selectedIdea.name],
+                ["الدولة:", state.projectInfo.country],
+                ["العملة:", state.projectInfo.currency],
+                [],
+                ["الفئة", "البند", "الوصف", "الكمية", "الوحدة", "سعر الوحدة", "الإجمالي"]
+            ];
+
+            let grandTotal = 0;
+            state.budget.forEach(cat => {
+                cat.items.forEach(item => {
+                    const lineTotal = item.qty * item.price;
+                    grandTotal += lineTotal;
+                    data.push([cat.name, item.item, item.desc, item.qty, item.unit, item.price, lineTotal]);
+                });
+            });
+
+            data.push([]);
+            data.push(["", "", "", "", "", "الإجمالي الكلي", grandTotal]);
+
+            const worksheet = XLSX.utils.aoa_to_sheet(data);
+
+            // Basic Styling for Worksheet
+            worksheet['!cols'] = [{ wch: 15 }, { wch: 20 }, { wch: 30 }, { wch: 10 }, { wch: 10 }, { wch: 15 }, { wch: 15 }];
+
+            XLSX.utils.book_append_sheet(workbook, worksheet, "Budget");
+            XLSX.writeFile(workbook, `Budget_${state.selectedIdea.name}.xlsx`);
+        } catch (error) {
+            console.error("Excel Export Error:", error);
+            alert("حدث خطأ أثناء تصدير ملف Excel.");
+        } finally {
+            btn.innerText = originalText;
+        }
+    };
+
+    // Simulation Fallbacks Removed - Enforcing Real AI usage
 
     // Theme Toggle
     document.getElementById('themeToggle').addEventListener('click', () => {
